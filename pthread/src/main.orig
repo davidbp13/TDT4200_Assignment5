@@ -77,30 +77,12 @@ void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int co
 void *worker(void *id) {
 	(void) id;
 	// This could be your pthread function
-	
-	long tid;
-    tid = (long)id;
-    printf("Hello World! It's me, thread #%ld!\n", tid);
-    pthread_exit(NULL);
 	return NULL;
 }
 
 void initializeWorkers(unsigned int threadsNumber) {
 	(void) threadsNumber;
 	// This could be you initializer function to do all the pthread related stuff.
-	
-	pthread_t threads[threadsNumber]; // Array holding each of the threads
-	int rc;							  // Return value for threads creation
-	long t;							  // Thread iterator
-	
-	for(t=0; t<threadsNumber; t++){
-       printf("In main: creating thread %ld\n", t);
-       rc = pthread_create(&threads[t], NULL, worker, (void *)t);
-       if (rc){
-          printf("ERROR; return code from pthread_create() is %d\n", rc);
-          exit(-1);
-       }
-    }
 }
 
 
@@ -306,9 +288,6 @@ int main( int argc, char *argv[] )
 		dwellBuffer[i] = dwellUncomputed;
 	}
 
-	//Threads should start here
-	initializeWorkers(useThreads);
-
 	if (useMarianiSilver) {
 		// Scale the blockSize from res up to a subdividable value
 		// Number of possible subdivisions:
@@ -329,9 +308,6 @@ int main( int argc, char *argv[] )
 			}
 		}
 	}
-	
-	//Threads should end here
-	
 
 	// Map dwell buffer to image
 	for (unsigned int y = 0; y < resolution; y++) {
