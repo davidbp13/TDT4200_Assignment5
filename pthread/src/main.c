@@ -63,6 +63,7 @@ job popJob (jobQueue **head) {
 }
 
 jobQueue *jobQueueHead = NULL;
+dwellType *dwellBuffer = NULL;
 
 void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int const, unsigned int const),
 			   dwellType *buffer,
@@ -72,35 +73,6 @@ void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int co
 {
 	job newJob = { .callback = callback, .dwellBuffer = buffer, .atY = atY, .atX = atX, .blockSize = blockSize };
 	putJob(&jobQueueHead, newJob);
-}
-
-void *worker(void *id) {
-	(void) id;
-	// This could be your pthread function
-	
-	long tid;
-    tid = (long)id;
-    printf("Hello World! It's me, thread #%ld!\n", tid);
-    pthread_exit(NULL);
-	return NULL;
-}
-
-void initializeWorkers(unsigned int threadsNumber) {
-	(void) threadsNumber;
-	// This could be you initializer function to do all the pthread related stuff.
-	
-	pthread_t threads[threadsNumber]; // Array holding each of the threads
-	int rc;							  // Return value for threads creation
-	long t;							  // Thread iterator
-	
-	for(t=0; t<threadsNumber; t++){
-       printf("In main: creating thread %ld\n", t);
-       rc = pthread_create(&threads[t], NULL, worker, (void *)t);
-       if (rc){
-          printf("ERROR; return code from pthread_create() is %d\n", rc);
-          exit(-1);
-       }
-    }
 }
 
 
@@ -113,6 +85,8 @@ void initializeWorkers(unsigned int threadsNumber) {
 bool markBorders;
 unsigned int blockDim;
 unsigned int subdivisions;
+bool useMarianiSilver = false;
+unsigned int useThreads = 4;
 
 void marianiSilver( dwellType *buffer,
 					unsigned int const atY,
@@ -139,7 +113,6 @@ void marianiSilver( dwellType *buffer,
 	}
 }
 
-
 void escapeTime( dwellType *buffer,
 				 unsigned int const atY,
 				 unsigned int const atX,
@@ -148,6 +121,105 @@ void escapeTime( dwellType *buffer,
 	computeBlock(buffer, atY, atX, blockSize);
 	if (markBorders)
 		markBorder(buffer, dwellBorderCompute, atY, atX, blockSize);
+}
+
+pthread_mutex_t mutex;
+pthread_cond_t cond;
+
+void *worker(void *id) {
+	long tid;
+    tid = (long)id;
+    //printf("Hello World! It's me, thread #%ld!\n", tid);
+    job threadJob;
+    
+	// Consume 
+	// Take a job from the jobQueue
+	while(jobQueueHead != NULL) {
+        pthread_mutex_lock(&mutex); //Start by locking the queue mutex
+       // printf("It's me, thread #%ld and I got the mutex\n", tid);
+
+        // If the jobQueue is empty, wait for jobs to show up
+        //while(jobQueueHead == NULL) {
+            // Wait until a new job is in the queue
+            //pthread_cond_wait(&cond, &mutex);
+        //}
+
+        threadJob = popJob(&jobQueueHead); //As we returned from the call, there must be new data in the queue - get it
+        pthread_mutex_unlock(&mutex); //Now unlock the mutex
+        
+        // Process the job that was taken
+        if (useMarianiSilver) {
+			/*// Scale the blockSize from res up to a subdividable value
+			// Number of possible subdivisions:
+			unsigned int const numDiv = ceil(logf((double) resolution/blockDim)/logf((double) subdivisions));
+			// Calculate a dividable resolution for the blockSize:
+			unsigned int const correctedBlockSize = pow(subdivisions,numDiv) * blockDim;
+			// Mariani-Silver subdivision algorithm
+			marianiSilver(dwellBuffer, 0, 0, correctedBlockSize);*/
+		} 
+		else {
+			// Traditional Mandelbrot-Set computation or the 'Escape Time' algorithm
+			// computeBlock respects the resolution of the image, so we scale the blocks up to
+			// a divideable dimension
+			//printf("It's me, thread #%ld and I'm pocessing a job. Y = %d, X = %d, size = %d.\n", tid, threadJob.atY, threadJob.atX, threadJob.blockSize);
+			threadJob.callback(threadJob.dwellBuffer, threadJob.atY, threadJob.atX, threadJob.blockSize);
+			//printf("It's me, thread #%ld and I finished my job\n", tid);
+			printf("It's me, thread #%ld and I'm finished a job. Y = %d, X = %d, size = %d.\n", tid, threadJob.atY, threadJob.atX, threadJob.blockSize);
+		}
+    }    
+    printf("It's me, thread #%ld and I exited the while loop\n", tid);
+    
+    pthread_exit(NULL);
+}
+
+void initializeWorkers(unsigned int threadsNumber) {
+	pthread_t threads[threadsNumber]; // Array holding each of the threads
+	pthread_attr_t attr;			  // Threads attribute
+	int rc;							  // Return value for threads creation
+	long t;							  // Thread iterator
+	
+	// Make threads joinable
+	pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+    
+	// Initialize the mutex and the condition variable
+	pthread_mutex_init(&mutex, NULL);
+    pthread_cond_init(&cond, NULL);
+    
+    // In the beggining there are no jobs in the queue. An  initial job or jobs are created depending on the algorithm
+    if (useMarianiSilver){
+		createJob(marianiSilver, dwellBuffer, 0, 0, resolution * resolution); // For Maniani-Silver one job is created and this job will create more as it is necessary
+	}
+	else{
+		// For Escape-Time threadsNumber * threadsNumber jobs are created at once
+		unsigned int block = ceil((double) resolution / threadsNumber);
+		for (unsigned int t = 0; t < threadsNumber; t++) {
+			for (unsigned int x = 0; x < threadsNumber; x++) {
+				createJob(escapeTime, dwellBuffer, t * block, x * block, block);
+			}
+		}	
+	}
+	
+	// Create threads
+	for(t=0; t<threadsNumber; t++){
+       printf("In main: creating thread %ld\n", t);
+       rc = pthread_create(&threads[t], NULL, worker, (void *)t);
+       if (rc){
+          printf("ERROR; return code from pthread_create() is %d\n", rc);
+          exit(-1);
+       }
+    }
+    
+    // Wait for threads to complete
+    pthread_attr_destroy(&attr);
+    for(t=0; t<threadsNumber; t++) {
+       rc = pthread_join(threads[t], NULL);
+       if (rc) {
+          printf("ERROR; return code from pthread_join() is %d\n", rc);
+          exit(-1);
+       }
+       printf("Main: completed join with thread %ld\n",t);
+    }
 }
 
 void help(char const *exec, char const opt, char const *optarg) {
@@ -185,17 +257,11 @@ int main( int argc, char *argv[] )
 	double scale = 1; // scaling factor
 	unsigned int colourIterations = 1; //how many times the colour gradient is repeated
 	bool quiet = false; //output something or not
-	bool useMarianiSilver = true;
-	unsigned int useThreads = 4;
 
 	resolution = 1024;
 	maxDwell = 512;
 	blockDim = 16;
 	subdivisions = 4;
-
-
-	/* Dwell Buffer */
-	dwellType *dwellBuffer = NULL;
 
 	/* Parameter parsing... */
 	{
@@ -309,7 +375,7 @@ int main( int argc, char *argv[] )
 	//Threads should start here
 	initializeWorkers(useThreads);
 
-	if (useMarianiSilver) {
+	/*if (useMarianiSilver) {
 		// Scale the blockSize from res up to a subdividable value
 		// Number of possible subdivisions:
 		unsigned int const numDiv = ceil(logf((double) resolution/blockDim)/logf((double) subdivisions));
@@ -328,10 +394,9 @@ int main( int argc, char *argv[] )
 				escapeTime(dwellBuffer, t * block, x * block, block);
 			}
 		}
-	}
+	}*/
 	
 	//Threads should end here
-	
 
 	// Map dwell buffer to image
 	for (unsigned int y = 0; y < resolution; y++) {
@@ -345,7 +410,7 @@ int main( int argc, char *argv[] )
 		fprintf(stderr, "ERROR: could not save image to %s\n", output);
 		goto error_exit;
 	}
-
+	
 	goto exit_graceful;
 error_exit:
 	ret = 1;
@@ -355,5 +420,9 @@ exit_graceful:
 	if(dwellBuffer)
 		free(dwellBuffer);
 	freeColourMap();
+	
+	printf("Main: program completed. Exiting.\n");
+	pthread_exit(NULL);
+	
 	return ret;
 }
