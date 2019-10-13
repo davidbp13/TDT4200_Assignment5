@@ -1,11 +1,11 @@
-RES := 1024
+RES := 4096
 OUTPUT := output/mandel.bmp
 OPTIMIZATION := 3
 
 X=0.5
 Y=0.5
 S=1.0
-I=512
+I=2048
 COLOUR=1
 THREADS=4
 ARGUMENTS := -o $(OUTPUT) -r $(RES) -x $(X) -y $(Y) -s $(S) -p $(THREADS) -c $(COLOUR) -i $(I)

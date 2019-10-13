@@ -1,4 +1,3 @@
-
 #include <getopt.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -65,6 +64,8 @@ job popJob (jobQueue **head) {
 jobQueue *jobQueueHead = NULL;
 dwellType *dwellBuffer = NULL;
 
+pthread_mutex_t mutex;
+
 void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int const, unsigned int const),
 			   dwellType *buffer,
 			   unsigned int const atY,
@@ -85,7 +86,7 @@ void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int co
 bool markBorders;
 unsigned int blockDim;
 unsigned int subdivisions;
-bool useMarianiSilver = false;
+bool useMarianiSilver = true;
 unsigned int useThreads = 4;
 
 void marianiSilver( dwellType *buffer,
@@ -107,7 +108,10 @@ void marianiSilver( dwellType *buffer,
 		unsigned int newBlockSize = blockSize / subdivisions;
 		for (unsigned int ydiv = 0; ydiv < subdivisions; ydiv++) {
 			for (unsigned int xdiv = 0; xdiv < subdivisions; xdiv++) {
-				marianiSilver(buffer, atY + (ydiv * newBlockSize), atX + (xdiv * newBlockSize), newBlockSize);
+				// Create a new job with for the subdivisions
+				pthread_mutex_lock(&mutex);
+				createJob(marianiSilver, dwellBuffer, atY + (ydiv * newBlockSize), atX + (xdiv * newBlockSize), newBlockSize);
+				pthread_mutex_unlock(&mutex); 		
 			}
 		}
 	}
@@ -123,86 +127,89 @@ void escapeTime( dwellType *buffer,
 		markBorder(buffer, dwellBorderCompute, atY, atX, blockSize);
 }
 
-pthread_mutex_t mutex;
-pthread_cond_t cond;
-
 void *worker(void *id) {
-	long tid;
-    tid = (long)id;
-    //printf("Hello World! It's me, thread #%ld!\n", tid);
-    job threadJob;
+    job threadJob = {.callback = NULL, .dwellBuffer = NULL, .atY = 0, .atX = 0, .blockSize = 0 };
     
-	// Consume 
-	// Take a job from the jobQueue
-	while(jobQueueHead != NULL) {
-        pthread_mutex_lock(&mutex); //Start by locking the queue mutex
-       // printf("It's me, thread #%ld and I got the mutex\n", tid);
-
-        // If the jobQueue is empty, wait for jobs to show up
-        //while(jobQueueHead == NULL) {
-            // Wait until a new job is in the queue
-            //pthread_cond_wait(&cond, &mutex);
-        //}
-
-        threadJob = popJob(&jobQueueHead); //As we returned from the call, there must be new data in the queue - get it
-        pthread_mutex_unlock(&mutex); //Now unlock the mutex
-        
-        // Process the job that was taken
-        if (useMarianiSilver) {
-			/*// Scale the blockSize from res up to a subdividable value
-			// Number of possible subdivisions:
-			unsigned int const numDiv = ceil(logf((double) resolution/blockDim)/logf((double) subdivisions));
-			// Calculate a dividable resolution for the blockSize:
-			unsigned int const correctedBlockSize = pow(subdivisions,numDiv) * blockDim;
-			// Mariani-Silver subdivision algorithm
-			marianiSilver(dwellBuffer, 0, 0, correctedBlockSize);*/
-		} 
-		else {
-			// Traditional Mandelbrot-Set computation or the 'Escape Time' algorithm
-			// computeBlock respects the resolution of the image, so we scale the blocks up to
-			// a divideable dimension
-			//printf("It's me, thread #%ld and I'm pocessing a job. Y = %d, X = %d, size = %d.\n", tid, threadJob.atY, threadJob.atX, threadJob.blockSize);
+    while(jobQueueHead != NULL) {
+		// Pop a job
+		pthread_mutex_lock(&mutex); 			// Start by locking the queue mutex
+		if(jobQueueHead != NULL) {
+			threadJob = popJob(&jobQueueHead); 	// Pop
+		}
+		pthread_mutex_unlock(&mutex); 			// Now unlock the mutex
+		
+		//Process the job
+		threadJob.callback(threadJob.dwellBuffer, threadJob.atY, threadJob.atX, threadJob.blockSize);
+		//printf("It's me, thread #%ld and I'm finished a job. Y = %d, X = %d, size = %d.\n", (long)id, threadJob.atY, threadJob.atX, threadJob.blockSize);
+	}
+	
+    /*if (useMarianiSilver) {
+		while(jobQueueHead != NULL) {
+			// Pop a job
+			pthread_mutex_lock(&mutex); 			// Start by locking the queue mutex
+			if(jobQueueHead != NULL) {
+				threadJob = popJob(&jobQueueHead); 	// Pop
+			}
+			pthread_mutex_unlock(&mutex); 			// Now unlock the mutex
+			 
+			//Process the job
 			threadJob.callback(threadJob.dwellBuffer, threadJob.atY, threadJob.atX, threadJob.blockSize);
-			//printf("It's me, thread #%ld and I finished my job\n", tid);
 			printf("It's me, thread #%ld and I'm finished a job. Y = %d, X = %d, size = %d.\n", tid, threadJob.atY, threadJob.atX, threadJob.blockSize);
 		}
-    }    
-    printf("It's me, thread #%ld and I exited the while loop\n", tid);
-    
-    pthread_exit(NULL);
+	}
+	else{
+		while(jobQueueHead != NULL) {
+			// Pop a job
+			pthread_mutex_lock(&mutex); 			// Start by locking the queue mutex
+			if(jobQueueHead != NULL) {
+				threadJob = popJob(&jobQueueHead); 	// Pop
+			}
+			pthread_mutex_unlock(&mutex); 			// Now unlock the mutex
+			
+			//Process the job
+			threadJob.callback(threadJob.dwellBuffer, threadJob.atY, threadJob.atX, threadJob.blockSize);
+			printf("It's me, thread #%ld and I'm finished a job. Y = %d, X = %d, size = %d.\n", tid, threadJob.atY, threadJob.atX, threadJob.blockSize);
+		}
+	}*/
+	
+	pthread_exit(NULL);
 }
 
 void initializeWorkers(unsigned int threadsNumber) {
 	pthread_t threads[threadsNumber]; // Array holding each of the threads
 	pthread_attr_t attr;			  // Threads attribute
-	int rc;							  // Return value for threads creation
-	long t;							  // Thread iterator
+	int rc;							  
+	long t;							  
 	
 	// Make threads joinable
 	pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
     
-	// Initialize the mutex and the condition variable
+	// Initialize the mutex
 	pthread_mutex_init(&mutex, NULL);
-    pthread_cond_init(&cond, NULL);
     
-    // In the beggining there are no jobs in the queue. An  initial job or jobs are created depending on the algorithm
+    // Create initial jobs
     if (useMarianiSilver){
-		createJob(marianiSilver, dwellBuffer, 0, 0, resolution * resolution); // For Maniani-Silver one job is created and this job will create more as it is necessary
+		// Scale the blockSize from res up to a subdividable value
+		// Number of possible subdivisions:
+		unsigned int const numDiv = ceil(logf((double) resolution/blockDim)/logf((double) subdivisions));
+		// Calculate a dividable resolution for the blockSize:
+		unsigned int const correctedBlockSize = pow(subdivisions,numDiv) * blockDim;
+		// Mariani-Silver subdivision algorithm
+		createJob(marianiSilver, dwellBuffer, 0, 0, correctedBlockSize); 			// For Maniani-Silver one job is created and this job will create more as it is necessary
 	}
 	else{
-		// For Escape-Time threadsNumber * threadsNumber jobs are created at once
 		unsigned int block = ceil((double) resolution / threadsNumber);
 		for (unsigned int t = 0; t < threadsNumber; t++) {
 			for (unsigned int x = 0; x < threadsNumber; x++) {
-				createJob(escapeTime, dwellBuffer, t * block, x * block, block);
+				createJob(escapeTime, dwellBuffer, t * block, x * block, block); 	// For Escape-Time threadsNumber * threadsNumber jobs are created at once
 			}
 		}	
 	}
 	
 	// Create threads
 	for(t=0; t<threadsNumber; t++){
-       printf("In main: creating thread %ld\n", t);
+       //printf("In main: creating thread %ld\n", t);
        rc = pthread_create(&threads[t], NULL, worker, (void *)t);
        if (rc){
           printf("ERROR; return code from pthread_create() is %d\n", rc);
@@ -210,7 +217,7 @@ void initializeWorkers(unsigned int threadsNumber) {
        }
     }
     
-    // Wait for threads to complete
+    // Join threads
     pthread_attr_destroy(&attr);
     for(t=0; t<threadsNumber; t++) {
        rc = pthread_join(threads[t], NULL);
@@ -218,7 +225,7 @@ void initializeWorkers(unsigned int threadsNumber) {
           printf("ERROR; return code from pthread_join() is %d\n", rc);
           exit(-1);
        }
-       printf("Main: completed join with thread %ld\n",t);
+	   //printf("Main: completed join with thread %ld\n",t);
     }
 }
 
@@ -372,31 +379,9 @@ int main( int argc, char *argv[] )
 		dwellBuffer[i] = dwellUncomputed;
 	}
 
-	//Threads should start here
+	//Threads start here
 	initializeWorkers(useThreads);
-
-	/*if (useMarianiSilver) {
-		// Scale the blockSize from res up to a subdividable value
-		// Number of possible subdivisions:
-		unsigned int const numDiv = ceil(logf((double) resolution/blockDim)/logf((double) subdivisions));
-		// Calculate a dividable resolution for the blockSize:
-		unsigned int const correctedBlockSize = pow(subdivisions,numDiv) * blockDim;
-		// Mariani-Silver subdivision algorithm
-		marianiSilver(dwellBuffer, 0, 0, correctedBlockSize);
-	} else {
-		// Traditional Mandelbrot-Set computation or the 'Escape Time' algorithm
-		// computeBlock respects the resolution of the image, so we scale the blocks up to
-		// a divideable dimension
-		unsigned int block = ceil((double) resolution / useThreads);
-
-		for (unsigned int t = 0; t < useThreads; t++) {
-			for (unsigned int x = 0; x < useThreads; x++) {
-				escapeTime(dwellBuffer, t * block, x * block, block);
-			}
-		}
-	}*/
-	
-	//Threads should end here
+	//Threads end here
 
 	// Map dwell buffer to image
 	for (unsigned int y = 0; y < resolution; y++) {
@@ -421,8 +406,7 @@ exit_graceful:
 		free(dwellBuffer);
 	freeColourMap();
 	
-	printf("Main: program completed. Exiting.\n");
-	pthread_exit(NULL);
+	pthread_mutex_destroy(&mutex);
 	
 	return ret;
 }
