@@ -17,7 +17,6 @@ static double end;
 //Serial version. Do not change this!
 void serial_mxm(const double *A, const double *B, double *C, int m, int n, int k)
 {
-  start = omp_get_wtime ( );
   for (int i = 0; i < m; i++) {
     for (int j = 0; j < n; j++) {
       C[i*n + j] = 0;
@@ -26,29 +25,11 @@ void serial_mxm(const double *A, const double *B, double *C, int m, int n, int k
       }
     }
   }
-  end = omp_get_wtime ( );
 }
 
 void omp_mxm(double *A, double *B, double *C, int m, int n, int k)
 {
-  int i, j, l;
-  start = omp_get_wtime ( );
-  
-  # pragma omp parallel shared (A, B, C, m, n, k) private (i, j, l)
-  {
-	  //printf ( "  The number of threads running    = %d\n", omp_get_num_threads ( ));
-	  # pragma omp for
-	  for (i = 0; i < m; i++) {
-		for (j = 0; j < n; j++) {
-		  C[i*n + j] = 0;
-		  for (l = 0; l < k; l++) {
-			C[i*n + j] += A[i*k + l] * B[l*n + j];
-		  }
-		}
-	  }
-  }
- 
-  end = omp_get_wtime ( );
+  printf("OpenMP version not implemented yet!\n");
 }
 
 void blas_mxm(double *A, double *B, double *C, int m, int n, int k)
