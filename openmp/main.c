@@ -33,10 +33,9 @@ void omp_mxm(double *A, double *B, double *C, int m, int n, int k)
 {
   int i, j, l;
   start = omp_get_wtime ( );
-  
   # pragma omp parallel shared (A, B, C, m, n, k) private (i, j, l)
   {
-	  //printf ( "  The number of threads running    = %d\n", omp_get_num_threads ( ));
+	  printf ( "  The number of threads running    = %d\n", omp_get_num_threads ( ));
 	  # pragma omp for
 	  for (i = 0; i < m; i++) {
 		for (j = 0; j < n; j++) {
@@ -47,7 +46,6 @@ void omp_mxm(double *A, double *B, double *C, int m, int n, int k)
 		}
 	  }
   }
- 
   end = omp_get_wtime ( );
 }
 

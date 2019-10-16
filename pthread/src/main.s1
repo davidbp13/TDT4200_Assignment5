@@ -64,10 +64,7 @@ job popJob (jobQueue **head) {
 jobQueue *jobQueueHead = NULL;
 dwellType *dwellBuffer = NULL;
 
-pthread_attr_t attr;			 
-pthread_mutex_t mutexJob;			// Mutex to protect the jobQueueHead during push and pop
-pthread_mutex_t mutexBusy;		// Mutex to protect the variable that holds how many threads are busy
-pthread_cond_t newJob;			// Condition to indicate a new job was added to an empty queue
+pthread_mutex_t mutex;
 
 void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int const, unsigned int const),
 			   dwellType *buffer,
@@ -89,10 +86,8 @@ void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int co
 bool markBorders;
 unsigned int blockDim;
 unsigned int subdivisions;
-bool useMarianiSilver = false;
-unsigned int useThreads = 8;
-bool done = false;				// Indicates if calculations are done
-int busyThreads = 0;			// Indicates the number of busy threads
+bool useMarianiSilver = true;
+unsigned int useThreads = 4;
 
 void marianiSilver( dwellType *buffer,
 					unsigned int const atY,
@@ -114,11 +109,9 @@ void marianiSilver( dwellType *buffer,
 		for (unsigned int ydiv = 0; ydiv < subdivisions; ydiv++) {
 			for (unsigned int xdiv = 0; xdiv < subdivisions; xdiv++) {
 				// Create a new job with for the subdivisions
-				// Needs to use the mutex while creating a job
-				pthread_mutex_lock(&mutexJob);
+				pthread_mutex_lock(&mutex);
 				createJob(marianiSilver, dwellBuffer, atY + (ydiv * newBlockSize), atX + (xdiv * newBlockSize), newBlockSize);
-				pthread_cond_signal(&newJob);
-				pthread_mutex_unlock(&mutexJob); 		
+				pthread_mutex_unlock(&mutex); 		
 			}
 		}
 	}
@@ -135,55 +128,56 @@ void escapeTime( dwellType *buffer,
 }
 
 void *worker(void *id) {
-	(void) id;
-	long tid;
-	tid = (long)id;
-	tid++; tid--; 	// Only to get rid of a warning :)
-	
-    job threadJob = {.callback = NULL, .dwellBuffer = NULL, .atY = 0, .atX = 0, .blockSize = 0};
+    job threadJob = {.callback = NULL, .dwellBuffer = NULL, .atY = 0, .atX = 0, .blockSize = 0 };
     
-   while(1) {     
-		pthread_mutex_lock(&mutexJob); 	// Lock the mutex
-		
-		// If the queue is empty, wait for a new job, if not just take a job
-		while (jobQueueHead == NULL) {
-			//printf("Thread %ld blocked\n", tid);
-			pthread_cond_wait(&newJob, &mutexJob);
-			// If done with everything, exit the thread
-			if (done){
-				pthread_mutex_unlock(&mutexJob); 
-				//printf("It's me, thread #%ld and I'm done!!!\n", tid);
-				pthread_exit(NULL);
-			}
-		}
-		
+    while(jobQueueHead != NULL) {
+		// Pop a job
+		pthread_mutex_lock(&mutex); 			// Start by locking the queue mutex
 		if(jobQueueHead != NULL) {
-			threadJob = popJob(&jobQueueHead); 	// Pop only if the queue is not empty
+			threadJob = popJob(&jobQueueHead); 	// Pop
 		}
-		pthread_mutex_unlock(&mutexJob); 			// Now unlock the mutex
+		pthread_mutex_unlock(&mutex); 			// Now unlock the mutex
 		
-		// Process the job
-		pthread_mutex_lock(&mutexBusy); 
-		busyThreads++;
-		pthread_mutex_unlock(&mutexBusy); 
+		//Process the job
 		threadJob.callback(threadJob.dwellBuffer, threadJob.atY, threadJob.atX, threadJob.blockSize);
-		pthread_mutex_lock(&mutexBusy); 
-		busyThreads--;
-		pthread_mutex_unlock(&mutexBusy); 
-		//printf("It's me, thread #%ld and I'm finished a job. Y = %d, X = %d, size = %d\n", (long)id, threadJob.atY, threadJob.atX, threadJob.blockSize);
-		
-		// The computations will be done if the queue is empty and the processed job was processing the last job
-		if (jobQueueHead == NULL &&  busyThreads == 0){
-			//printf("It's me, thread #%ld and this is done!!!\n", tid);
-			done = true;
-			pthread_cond_broadcast(&newJob);
-			pthread_exit(NULL);
+		//printf("It's me, thread #%ld and I'm finished a job. Y = %d, X = %d, size = %d.\n", (long)id, threadJob.atY, threadJob.atX, threadJob.blockSize);
+	}
+	
+    /*if (useMarianiSilver) {
+		while(jobQueueHead != NULL) {
+			// Pop a job
+			pthread_mutex_lock(&mutex); 			// Start by locking the queue mutex
+			if(jobQueueHead != NULL) {
+				threadJob = popJob(&jobQueueHead); 	// Pop
+			}
+			pthread_mutex_unlock(&mutex); 			// Now unlock the mutex
+			 
+			//Process the job
+			threadJob.callback(threadJob.dwellBuffer, threadJob.atY, threadJob.atX, threadJob.blockSize);
+			printf("It's me, thread #%ld and I'm finished a job. Y = %d, X = %d, size = %d.\n", tid, threadJob.atY, threadJob.atX, threadJob.blockSize);
 		}
 	}
+	else{
+		while(jobQueueHead != NULL) {
+			// Pop a job
+			pthread_mutex_lock(&mutex); 			// Start by locking the queue mutex
+			if(jobQueueHead != NULL) {
+				threadJob = popJob(&jobQueueHead); 	// Pop
+			}
+			pthread_mutex_unlock(&mutex); 			// Now unlock the mutex
+			
+			//Process the job
+			threadJob.callback(threadJob.dwellBuffer, threadJob.atY, threadJob.atX, threadJob.blockSize);
+			printf("It's me, thread #%ld and I'm finished a job. Y = %d, X = %d, size = %d.\n", tid, threadJob.atY, threadJob.atX, threadJob.blockSize);
+		}
+	}*/
+	
+	pthread_exit(NULL);
 }
 
 void initializeWorkers(unsigned int threadsNumber) {
 	pthread_t threads[threadsNumber]; // Array holding each of the threads
+	pthread_attr_t attr;			  // Threads attribute
 	int rc;							  
 	long t;							  
 	
@@ -192,13 +186,9 @@ void initializeWorkers(unsigned int threadsNumber) {
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
     
 	// Initialize the mutex
-	pthread_mutex_init(&mutexJob, NULL);
-	pthread_mutex_init(&mutexBusy, NULL);
-	
-	// Initialize the condition variable
-	pthread_cond_init (&newJob, NULL);
-	
-	// Create initial jobs
+	pthread_mutex_init(&mutex, NULL);
+    
+    // Create initial jobs
     if (useMarianiSilver){
 		// Scale the blockSize from res up to a subdividable value
 		// Number of possible subdivisions:
@@ -216,7 +206,7 @@ void initializeWorkers(unsigned int threadsNumber) {
 			}
 		}	
 	}
-    	
+	
 	// Create threads
 	for(t=0; t<threadsNumber; t++){
        //printf("In main: creating thread %ld\n", t);
@@ -228,6 +218,7 @@ void initializeWorkers(unsigned int threadsNumber) {
     }
     
     // Join threads
+    pthread_attr_destroy(&attr);
     for(t=0; t<threadsNumber; t++) {
        rc = pthread_join(threads[t], NULL);
        if (rc) {
@@ -415,11 +406,7 @@ exit_graceful:
 		free(dwellBuffer);
 	freeColourMap();
 	
-	// Pthread cleanup
-	pthread_attr_destroy(&attr);
-	pthread_mutex_destroy(&mutexJob);
-	pthread_mutex_destroy(&mutexBusy);
-	pthread_cond_destroy(&newJob);
+	pthread_mutex_destroy(&mutex);
 	
 	return ret;
 }

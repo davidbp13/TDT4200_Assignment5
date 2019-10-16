@@ -7,7 +7,7 @@ Y=0.5
 S=1.0
 I=2048
 COLOUR=1
-THREADS=4
+THREADS=8
 ARGUMENTS := -o $(OUTPUT) -r $(RES) -x $(X) -y $(Y) -s $(S) -p $(THREADS) -c $(COLOUR) -i $(I)
 
 ifeq ($(MARK),1)
